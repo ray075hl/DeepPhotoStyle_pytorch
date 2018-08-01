@@ -21,8 +21,8 @@ if __name__ == '__main__':
 
     imsize = 512 if torch.cuda.is_available() else 128  # use small size if no gpu
 
-    style_img = utils.load_image('000139.jpg', imsize)
-    content_img = utils.load_image('5.jpeg', imsize)
+    style_img = utils.load_image('style.jpg', imsize)
+    content_img = utils.load_image('content.jpg', imsize)
 
     style_img = utils.image_to_tensor(style_img).unsqueeze(0)
     content_img = utils.image_to_tensor(content_img).unsqueeze(0)
