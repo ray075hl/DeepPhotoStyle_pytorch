@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.autograd import Variable
 import torchvision.models as models
 import copy
 
@@ -64,19 +65,11 @@ class StyleLoss(nn.Module):
         channel = self.style_mask.size()[0]
         
         # ********
-<<<<<<< HEAD
         xc = torch.linspace(-1, 1, width).repeat(height, 1)
         yc = torch.linspace(-1, 1, height).view(-1, 1).repeat(1, width)
         grid = torch.cat((xc.unsqueeze(2), yc.unsqueeze(2)), 2) 
         grid = grid.unsqueeze_(0).to(config.device0)
         mask_ = F.grid_sample(self.style_mask.unsqueeze(0), grid).squeeze(0)
-=======
-        temp_style_mask = self.style_mask.permute(1, 2, 0)
-        mask_ = utils.bilinear_interpolate_torch(temp_style_mask, 
-                                                 torch.FloatTensor(height).type(torch.cuda.FloatTensor), 
-                                                 torch.FloatTensor(width).type(torch.cuda.FloatTensor))
-        mask_ = mask_.permute(2, 0, 1)
->>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
         # ********       
         #mask_ = self.style_mask.data.resize_(channel, height, width).clone()
         target_feature_3d = target_feature.squeeze(0).clone()
@@ -95,19 +88,11 @@ class StyleLoss(nn.Module):
         _, channel_f, height, width = input_feature.size()
         channel = self.content_mask.size()[0]
         # ****
-<<<<<<< HEAD
         xc = torch.linspace(-1, 1, width).repeat(height, 1)
         yc = torch.linspace(-1, 1, height).view(-1, 1).repeat(1, width)
         grid = torch.cat((xc.unsqueeze(2), yc.unsqueeze(2)), 2)
         grid = grid.unsqueeze_(0).to(config.device0)
         mask = F.grid_sample(self.content_mask.unsqueeze(0), grid).squeeze(0)
-=======
-        temp_content_mask = self.content_mask.permute(1, 2, 0)
-        mask = utils.bilinear_interpolate_torch(temp_content_mask, 
-                                                torch.FloatTensor(height).type(torch.cuda.FloatTensor), 
-                                                torch.FloatTensor(width).type(torch.cuda.FloatTensor))
-        mask = mask.permute(2, 0, 1)
->>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
         # ****
         #mask = self.content_mask.data.resize_(channel, height, width).clone()
         input_feature_3d = input_feature.squeeze(0).clone()
@@ -159,6 +144,23 @@ class TVLoss(nn.Module):
         self.loss = torch.sum(gx**2 + gy**2)/(height * width)
         return input
 
+class RealLoss(nn.Module):
+    
+    def __init__(self, laplacian_m):
+        super(RealLoss, self).__init__()
+        self.L = Variable(laplacian_m.detach(), requires_grad=False)
+
+    def forward(self, input):
+        channel, height, width = input.size()[1:4]
+        self.loss = 0
+        for i in range(channel):
+            temp = input[0, i, :, :]
+            temp = torch.reshape(temp, (1, height*width))
+            r = torch.mm(self.L, temp.t())
+            self.loss += torch.mm(temp , r)
+       
+        return input
+
 # create a module to normalize input image so we can easily put it in a
 # nn.Sequential
 class Normalization(nn.Module):
@@ -179,7 +181,7 @@ class Normalization(nn.Module):
 content_layers_default = ['conv_4'] 
 style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
-                               style_img, content_img, style_mask, content_mask,
+                               style_img, content_img, style_mask, content_mask, laplacian_m,
                                content_layer= content_layers_default,
                                style_layers=style_layers_default):
     cnn = copy.deepcopy(cnn)
@@ -191,10 +193,16 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
     content_losses = []
     style_losses = []
     tv_losses = []
+    #real_losses = []
 
     # assuming that cnn is a nn.Sequential, so we make a new nn. Sequential
     # to put in modules that are supposed to be activated sequentially
     model = nn.Sequential(normalization)
+
+    #realistic_loss = RealLoss(laplacian_m)
+    #model.add_module("real_loss_{}".format(0), realistic_loss)
+    #real_losses.append(realistic_loss) 
+
     tv_loss = TVLoss()
     model.add_module("tv_loss_{}".format(0), tv_loss)
     tv_losses.append(tv_loss)
@@ -242,33 +250,36 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
     model = model[:(i+1)]
 
-    return model, style_losses, content_losses, tv_losses
+    return model, style_losses, content_losses, tv_losses#, real_losses
 
 
 def get_input_optimizer(input_img):
     # this line to show that input is a parameter that requires a gradient
-<<<<<<< HEAD
-    # optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000, lr=0.1)
-    optimizer = optim.Adadelta([input_img.requires_grad_()])
-=======
     optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000, lr=0.1)
->>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
+    # optimizer = optim.Adadelta([input_img.requires_grad_()])
     return optimizer
 
+def manual_grad(image, laplacian_m):
+    img = image.squeeze(0)
+    channel, height, width = img.size() 
+    loss = 0
+    grads = list()
+    
+    grad = torch.mm(laplacian_m, img.reshape(-1, 3))
+    
+    loss += (grad * img.reshape(-1, 3)).sum()
+    return loss, 2.*grad.reshape(image.size())
+   
+
 def run_style_transfer(cnn, normalization_mean, normalization_std,
-                       content_img, style_img, input_img, style_mask, content_mask,
-<<<<<<< HEAD
+                       content_img, style_img, input_img, style_mask, content_mask, laplacian_m,
                        num_steps=12500000,
-                       style_weight=50000, content_weight=1, tv_weight=0.001):
-=======
-                       num_steps=12500,
-                       style_weight=1000000, content_weight=1, tv_weight=0.001):
->>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
+                       style_weight=50000, content_weight=1, tv_weight=0.001, rl_weight=10000):
 
     """Run the style transfer."""
     print("Buliding the style transfer model..")
     model, style_losses, content_losses, tv_losses = get_style_model_and_losses(cnn,
-        normalization_mean, normalization_std, style_img, content_img, style_mask, content_mask)
+        normalization_mean, normalization_std, style_img, content_img, style_mask, content_mask, laplacian_m)
     optimizer = get_input_optimizer(input_img)
 
     print("Optimizing...")
@@ -284,6 +295,8 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
             style_score = 0
             content_score = 0
             tv_score = 0
+            #rl_score = 0
+
             weights_s = [0.2, 0.2, 0.2, 0.2, 0.2]
             for ii, sl in enumerate(style_losses):
                 style_score += weights_s[ii]*sl.loss
@@ -291,29 +304,31 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
                 content_score += cl.loss
             for tl in tv_losses:
                 tv_score += tl.loss
+            #for rl in real_losses:
+            #    rl_score += rl.loss
 
             style_score *= style_weight
             content_score *= content_weight
             tv_score *= tv_weight
-
-            loss = style_score + content_score + tv_score
+                       
+ 
+            loss = style_score + content_score + tv_score # + rl_score
             loss.backward()
-
+            
+            rl_score, part_grid = manual_grad(input_img, laplacian_m)
+            input_img.grad = input_img.grad + rl_weight * part_grid
+            
             run[0] += 1
             if run[0] % 50 == 0:
                 print("run {}:".format(run))
-                print('Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f}'.format(
-                    style_score.item(), content_score.item(), tv_score.item()
+                print('Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} Realistic Loss: {:4f}'.format(
+                    style_score.item(), content_score.item(), tv_score.item(), rl_score
                 ))
                 print()
                 saved_img = input_img.clone()
                 saved_img.data.clamp_(0, 1)
-<<<<<<< HEAD
                 utils.save_pic(saved_img, 7000000+run[0])
-=======
-                utils.save_pic(saved_img, run[0])
->>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
-            return style_score + content_score
+            return style_score + content_score + tv_score + rl_score
 
         optimizer.step(closure)
         

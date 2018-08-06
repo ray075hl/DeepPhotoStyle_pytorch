@@ -1,6 +1,8 @@
 from PIL import Image
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
+from matting import *
+import config
 
 def load_image(path, size):
 
@@ -65,7 +67,6 @@ def bilinear_interpolate_torch(im, x, y):
     
     return torch.t(torch.t(Ia)*wa) + torch.t(torch.t(Ib)*wb) + torch.t(torch.t(Ic)*wc) + torch.t(torch.t(Id)*wd)
 
-<<<<<<< HEAD
 def nearest_interpolate(array, height, width):
     channel, ori_h, ori_w = array.shape
     ratio_h = ori_h / height
@@ -81,6 +82,26 @@ def nearest_interpolate(array, height, width):
     return target_array    
 
 
+def compute_lap(path_img):
+    '''
+    input: image path
+    output: laplacian matrix of the input image, format is sparse matrix of pytorch in gpu
+    '''
+    image = 1.0 * cv2.imread(path_img, -1)/255.0
+    M = compute_laplacian(image)    
+    M = M.tocoo().astype(np.float32)
+    indices = torch.from_numpy(np.vstack((M.row, M.col))).long().cuda()
+    values = torch.from_numpy(M.data).cuda()
+    shape = torch.Size(M.shape)
+    Ms = torch.sparse_coo_tensor(indices, values, shape, device=torch.device('cuda'))
+    return Ms
 
-=======
->>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
+
+
+
+
+
+
+
+
+
