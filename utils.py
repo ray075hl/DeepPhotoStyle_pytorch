@@ -65,6 +65,7 @@ def bilinear_interpolate_torch(im, x, y):
     
     return torch.t(torch.t(Ia)*wa) + torch.t(torch.t(Ib)*wb) + torch.t(torch.t(Ic)*wc) + torch.t(torch.t(Id)*wd)
 
+<<<<<<< HEAD
 def nearest_interpolate(array, height, width):
     channel, ori_h, ori_w = array.shape
     ratio_h = ori_h / height
@@ -81,3 +82,5 @@ def nearest_interpolate(array, height, width):
 
 
 
+=======
+>>>>>>> d8bf45d512847097a87b547b239243086de6a4d6

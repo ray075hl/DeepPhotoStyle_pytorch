@@ -64,11 +64,19 @@ class StyleLoss(nn.Module):
         channel = self.style_mask.size()[0]
         
         # ********
+<<<<<<< HEAD
         xc = torch.linspace(-1, 1, width).repeat(height, 1)
         yc = torch.linspace(-1, 1, height).view(-1, 1).repeat(1, width)
         grid = torch.cat((xc.unsqueeze(2), yc.unsqueeze(2)), 2) 
         grid = grid.unsqueeze_(0).to(config.device0)
         mask_ = F.grid_sample(self.style_mask.unsqueeze(0), grid).squeeze(0)
+=======
+        temp_style_mask = self.style_mask.permute(1, 2, 0)
+        mask_ = utils.bilinear_interpolate_torch(temp_style_mask, 
+                                                 torch.FloatTensor(height).type(torch.cuda.FloatTensor), 
+                                                 torch.FloatTensor(width).type(torch.cuda.FloatTensor))
+        mask_ = mask_.permute(2, 0, 1)
+>>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
         # ********       
         #mask_ = self.style_mask.data.resize_(channel, height, width).clone()
         target_feature_3d = target_feature.squeeze(0).clone()
@@ -87,11 +95,19 @@ class StyleLoss(nn.Module):
         _, channel_f, height, width = input_feature.size()
         channel = self.content_mask.size()[0]
         # ****
+<<<<<<< HEAD
         xc = torch.linspace(-1, 1, width).repeat(height, 1)
         yc = torch.linspace(-1, 1, height).view(-1, 1).repeat(1, width)
         grid = torch.cat((xc.unsqueeze(2), yc.unsqueeze(2)), 2)
         grid = grid.unsqueeze_(0).to(config.device0)
         mask = F.grid_sample(self.content_mask.unsqueeze(0), grid).squeeze(0)
+=======
+        temp_content_mask = self.content_mask.permute(1, 2, 0)
+        mask = utils.bilinear_interpolate_torch(temp_content_mask, 
+                                                torch.FloatTensor(height).type(torch.cuda.FloatTensor), 
+                                                torch.FloatTensor(width).type(torch.cuda.FloatTensor))
+        mask = mask.permute(2, 0, 1)
+>>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
         # ****
         #mask = self.content_mask.data.resize_(channel, height, width).clone()
         input_feature_3d = input_feature.squeeze(0).clone()
@@ -231,14 +247,23 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
 def get_input_optimizer(input_img):
     # this line to show that input is a parameter that requires a gradient
+<<<<<<< HEAD
     # optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000, lr=0.1)
     optimizer = optim.Adadelta([input_img.requires_grad_()])
+=======
+    optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000, lr=0.1)
+>>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
     return optimizer
 
 def run_style_transfer(cnn, normalization_mean, normalization_std,
                        content_img, style_img, input_img, style_mask, content_mask,
+<<<<<<< HEAD
                        num_steps=12500000,
                        style_weight=50000, content_weight=1, tv_weight=0.001):
+=======
+                       num_steps=12500,
+                       style_weight=1000000, content_weight=1, tv_weight=0.001):
+>>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
 
     """Run the style transfer."""
     print("Buliding the style transfer model..")
@@ -283,7 +308,11 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
                 print()
                 saved_img = input_img.clone()
                 saved_img.data.clamp_(0, 1)
+<<<<<<< HEAD
                 utils.save_pic(saved_img, 7000000+run[0])
+=======
+                utils.save_pic(saved_img, run[0])
+>>>>>>> d8bf45d512847097a87b547b239243086de6a4d6
             return style_score + content_score
 
         optimizer.step(closure)
