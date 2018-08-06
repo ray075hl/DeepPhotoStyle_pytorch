@@ -8,6 +8,7 @@ import copy
 
 import config
 import cv2
+import utils
 class ContentLoss(nn.Module):
 
     def __init__(self, target,):
@@ -19,6 +20,7 @@ class ContentLoss(nn.Module):
         self.target = target.detach()
 
     def forward(self, input):
+        #print('*************: ', input.size(), self.target.size())
         self.loss = F.mse_loss(input, self.target)
         return input
 
@@ -34,12 +36,12 @@ def gram_matrix(input):
 
     # we 'normalize' the values of the gram matrix
     # by dividing by the number of element in each feature maps.
-    return G.div(a * b * c *d)
+    return G.div(2 * a * b * c *d)
 
-
+'''
 class StyleLoss(nn.Module):
 
-    def __init__(self, target_feature):
+    def __init__(self, target_feature, a, b):
         super(StyleLoss, self).__init__()
         self.target = gram_matrix(target_feature).detach()
 
@@ -47,6 +49,66 @@ class StyleLoss(nn.Module):
         G = gram_matrix(input)
         self.loss = F.mse_loss(G, self.target)
         return input
+'''
+
+class StyleLoss(nn.Module):
+
+    def __init__(self, target_feature, style_mask, content_mask):
+        super(StyleLoss, self).__init__()
+
+        self.style_mask = style_mask.clone()
+        self.content_mask = content_mask.clone()
+
+        #print(target_feature.type(), mask.type())
+        _, channel_f, height, width = target_feature.size()
+        channel = self.style_mask.size()[0]
+        
+        # ********
+        xc = torch.linspace(-1, 1, width).repeat(height, 1)
+        yc = torch.linspace(-1, 1, height).view(-1, 1).repeat(1, width)
+        grid = torch.cat((xc.unsqueeze(2), yc.unsqueeze(2)), 2) 
+        grid = grid.unsqueeze_(0).to(config.device0)
+        mask_ = F.grid_sample(self.style_mask.unsqueeze(0), grid).squeeze(0)
+        # ********       
+        #mask_ = self.style_mask.data.resize_(channel, height, width).clone()
+        target_feature_3d = target_feature.squeeze(0).clone()
+        size_of_mask = (channel, channel_f, height, width)
+        target_feature_masked = torch.zeros(size_of_mask, dtype=torch.float).to(config.device0)
+        for i in range(channel):
+            target_feature_masked[i, :, :, :] = mask_[i, :, :] * target_feature_3d
+
+        self.targets = list()
+        for i in range(channel):
+            temp = target_feature_masked[i, :, :, :]
+            self.targets.append( gram_matrix(temp.unsqueeze(0)).detach() )
+
+    def forward(self, input_feature):
+        self.loss = 0
+        _, channel_f, height, width = input_feature.size()
+        channel = self.content_mask.size()[0]
+        # ****
+        xc = torch.linspace(-1, 1, width).repeat(height, 1)
+        yc = torch.linspace(-1, 1, height).view(-1, 1).repeat(1, width)
+        grid = torch.cat((xc.unsqueeze(2), yc.unsqueeze(2)), 2)
+        grid = grid.unsqueeze_(0).to(config.device0)
+        mask = F.grid_sample(self.content_mask.unsqueeze(0), grid).squeeze(0)
+        # ****
+        #mask = self.content_mask.data.resize_(channel, height, width).clone()
+        input_feature_3d = input_feature.squeeze(0).clone()
+        size_of_mask = (channel, channel_f, height, width)
+        input_feature_masked = torch.zeros(size_of_mask, dtype=torch.float32).to(config.device0)
+        for i in range(channel):
+            input_feature_masked[i, :, :, :] = mask[i, :, :] * input_feature_3d
+
+        inputs_G = list()
+        for i in range(channel):
+            temp = input_feature_masked[i, :, :, :]
+            inputs_G.append( gram_matrix(temp.unsqueeze(0)) )
+
+        for i in range(channel):
+            self.loss += F.mse_loss(inputs_G[i], self.targets[i])
+        
+        return input_feature
 
 class TVLoss(nn.Module):
 
@@ -98,11 +160,11 @@ class Normalization(nn.Module):
 
 
 # desired depth layers to compute style/content losses:
-content_layers_default = ['conv_2'] # ['conv_2']
+content_layers_default = ['conv_4'] 
 style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
-
 def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
-                               style_img, content_img, content_layer= content_layers_default,
+                               style_img, content_img, style_mask, content_mask,
+                               content_layer= content_layers_default,
                                style_layers=style_layers_default):
     cnn = copy.deepcopy(cnn)
 
@@ -142,15 +204,18 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
         if name in content_layer:
             # add content loss
+            print('xixi: ', content_img.size())
             target = model(content_img).detach()
+            print('content target size: ', target.size())
             content_loss = ContentLoss(target)
             model.add_module("content_loss_{}".format(i), content_loss)
             content_losses.append(content_loss)
 
         if name in style_layers:
             # add style loss:
+            print('style_:', style_img.type())
             target_feature = model(style_img).detach()
-            style_loss = StyleLoss(target_feature)
+            style_loss = StyleLoss(target_feature, style_mask.detach(), content_mask.detach())
             model.add_module("style_loss_{}".format(i), style_loss)
             style_losses.append(style_loss)
 
@@ -166,17 +231,19 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
 def get_input_optimizer(input_img):
     # this line to show that input is a parameter that requires a gradient
-    optimizer = optim.LBFGS([input_img.requires_grad_()])
+    # optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000, lr=0.1)
+    optimizer = optim.Adadelta([input_img.requires_grad_()])
     return optimizer
 
 def run_style_transfer(cnn, normalization_mean, normalization_std,
-                       content_img, style_img, input_img, num_steps=300,
-                       style_weight=1000000, content_weight=50, tv_weight=30):
+                       content_img, style_img, input_img, style_mask, content_mask,
+                       num_steps=12500000,
+                       style_weight=50000, content_weight=1, tv_weight=0.001):
 
     """Run the style transfer."""
     print("Buliding the style transfer model..")
     model, style_losses, content_losses, tv_losses = get_style_model_and_losses(cnn,
-        normalization_mean, normalization_std, style_img, content_img)
+        normalization_mean, normalization_std, style_img, content_img, style_mask, content_mask)
     optimizer = get_input_optimizer(input_img)
 
     print("Optimizing...")
@@ -187,14 +254,14 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
         def closure():
             # correct the values of updated input image
             input_img.data.clamp_(0, 1)
-
             optimizer.zero_grad()
             model(input_img)
             style_score = 0
             content_score = 0
             tv_score = 0
-            for sl in style_losses:
-                style_score += sl.loss
+            weights_s = [0.2, 0.2, 0.2, 0.2, 0.2]
+            for ii, sl in enumerate(style_losses):
+                style_score += weights_s[ii]*sl.loss
             for cl in content_losses:
                 content_score += cl.loss
             for tl in tv_losses:
@@ -214,14 +281,16 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
                     style_score.item(), content_score.item(), tv_score.item()
                 ))
                 print()
-
+                saved_img = input_img.clone()
+                saved_img.data.clamp_(0, 1)
+                utils.save_pic(saved_img, 7000000+run[0])
             return style_score + content_score
 
         optimizer.step(closure)
-
+        
     # a last corrention...
     input_img.data.clamp_(0, 1)
-
+    
     return input_img
 
 
