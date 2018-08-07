@@ -178,8 +178,8 @@ class Normalization(nn.Module):
 
 
 # desired depth layers to compute style/content losses:
-content_layers_default = ['conv_4'] 
-style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+content_layers_default = ['conv4_2'] 
+style_layers_default = ['conv1_1', 'conv2_1', 'conv3_1', 'conv4_1', 'conv5_1']
 def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
                                style_img, content_img, style_mask, content_mask, laplacian_m,
                                content_layer= content_layers_default,
@@ -206,21 +206,26 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
     tv_loss = TVLoss()
     model.add_module("tv_loss_{}".format(0), tv_loss)
     tv_losses.append(tv_loss)
-    i = 0 # increment every time we see a conv layer
+    num_pool = 1
+    num_conv = 0
+    content_num = 0
+    style_num = 0
     for layer in cnn.children():          # cnn feature  是没有 全连接层的
         if isinstance(layer, nn.Conv2d):
-            i += 1
-            name = 'conv_{}'.format(i)
+            num_conv += 1
+            name = 'conv{}_{}'.format(num_pool, num_conv)
         elif isinstance(layer, nn.ReLU):
-            name = 'relu_{}'.format(i)
+            name = 'relu{}_{}'.format(num_pool, num_conv)
             # The in-place version doesn't play very nicely with the ContentLoss
             # and StyleLoss we insert below. So we replace with out-of-place
             # ones here.
             layer = nn.ReLU(inplace=False)
         elif isinstance(layer, nn.MaxPool2d):
-            name = 'pool_{}'.format(i)
+            name = 'pool_{}'.format(num_pool)
+            num_pool += 1
+            num_conv = 0
         elif isinstance(layer, nn.BatchNorm2d):
-            name = 'bn_{}'.format(i)
+            name = 'bn{}_{}'.format(num_pool, num_conv)
         else:
             raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
 
@@ -232,16 +237,17 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
             target = model(content_img).detach()
             print('content target size: ', target.size())
             content_loss = ContentLoss(target)
-            model.add_module("content_loss_{}".format(i), content_loss)
+            model.add_module("content_loss_{}".format(content_num), content_loss)
             content_losses.append(content_loss)
-
+            content_num += 1
         if name in style_layers:
             # add style loss:
             print('style_:', style_img.type())
             target_feature = model(style_img).detach()
             style_loss = StyleLoss(target_feature, style_mask.detach(), content_mask.detach())
-            model.add_module("style_loss_{}".format(i), style_loss)
+            model.add_module("style_loss_{}".format(style_num), style_loss)
             style_losses.append(style_loss)
+            style_num += 1
 
     # now we trim off the layers after the last content and style losses
     for i in range(len(model)-1, -1, -1):
@@ -258,7 +264,7 @@ def get_input_optimizer(input_img):
     optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000, lr=0.1)
     # optimizer = optim.Adadelta([input_img.requires_grad_()])
     return optimizer
-
+'''
 def manual_grad(image, laplacian_m):
     img = image.squeeze(0)
     channel, height, width = img.size() 
@@ -268,13 +274,24 @@ def manual_grad(image, laplacian_m):
     grad = torch.mm(laplacian_m, img.reshape(-1, 3))
     
     loss += (grad * img.reshape(-1, 3)).sum()
-    return loss, 2.*grad.reshape(image.size())
-   
+    return loss, 2.*grad.reshape(img.size())
+'''
+def manual_grad(image, laplacian_m):
+    img = image.squeeze(0)
+    channel, height, width = img.size()
+    loss = 0
+    grads = list()
+    for i in range(channel):
+        grad = torch.mm(laplacian_m, img[i, :, :].reshape(-1, 1))
+        loss += torch.mm(img[i, :, :].reshape(1, -1), grad)
+        grads.append(grad.reshape((height, width)))
+    gradient = torch.stack(grads, dim=0).unsqueeze(0)
+    return loss, 2.*gradient
 
 def run_style_transfer(cnn, normalization_mean, normalization_std,
                        content_img, style_img, input_img, style_mask, content_mask, laplacian_m,
                        num_steps=12500000,
-                       style_weight=50000, content_weight=1, tv_weight=0.001, rl_weight=10000):
+                       style_weight=10000, content_weight=1, tv_weight=0.001, rl_weight=5):
 
     """Run the style transfer."""
     print("Buliding the style transfer model..")
@@ -312,16 +329,18 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
             tv_score *= tv_weight
                        
  
-            loss = style_score + content_score + tv_score # + rl_score
+            rl_score, part_grid = manual_grad(input_img, laplacian_m)
+            rl_score *= rl_weight
+
+            loss = style_score + content_score + tv_score + rl_score
             loss.backward()
             
-            rl_score, part_grid = manual_grad(input_img, laplacian_m)
-            input_img.grad = input_img.grad + rl_weight * part_grid
+            #input_img.grad = input_img.grad + rl_weight * part_grid
             
             run[0] += 1
             if run[0] % 50 == 0:
                 print("run {}:".format(run))
-                print('Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} Realistic Loss: {:4f}'.format(
+                print('Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} Realistic Loss: {}'.format(
                     style_score.item(), content_score.item(), tv_score.item(), rl_score
                 ))
                 print()
