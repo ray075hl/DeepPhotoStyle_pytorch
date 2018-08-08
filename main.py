@@ -40,8 +40,8 @@ def gen_mask(image_path):
 if __name__ == '__main__':
 
     #----------init------------
-    style_image_path = 'city_night2.jpg'
-    content_image_path = 'city_day.jpg'
+    style_image_path = 'DSC5778_after.jpg'
+    content_image_path = 'v2_108.jpeg'
     #-------------------------
     print('Computing Laplacian matrix of content image')
     L = utils.compute_lap(content_image_path)
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     count = 0
     for i in range(150):
         temp = style_mask_origin[i, :, :].numpy()
-        if i not in del_classed and np.max(temp)>0.5:
+        if i not in del_classed and np.max(temp)>0.6:
             merged_style_mask[count, :, :] = temp
             merged_content_mask[count, :, :] = content_mask_origin[i, :, :].numpy()
             count += 1
@@ -66,8 +66,8 @@ if __name__ == '__main__':
     style_mask_tensor = torch.from_numpy(merged_style_mask[:count, :, :]).float().to(config.device0)
     content_mask_tensor = torch.from_numpy(merged_content_mask[:count, :, :]).float().to(config.device0)
     #--------------------------
-    #utils.save_pic( style_mask_tensor[:3, :, :], 1111 )
-    #utils.save_pic( content_mask_tensor[:3, :, :], 2222)
+    utils.save_pic( style_mask_tensor[:3, :, :], 1111 )
+    utils.save_pic( content_mask_tensor[:3, :, :], 2222)
     device = torch.device(config.device0)
 
     # imsize = 512 if torch.cuda.is_available() else 128  # use small size if no gpu
@@ -92,8 +92,8 @@ if __name__ == '__main__':
     cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(config.device0)
     cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(config.device0)
     
-    input_img = torch.randn(1, 3, height_c, width_c).to(config.device0)
-    #input_img = content_img.clone()
+    #input_img = torch.randn(1, 3, height_c, width_c).to(config.device0)
+    input_img = content_img.clone()
     print('input_img size: ', input_img.size())
     output = run_style_transfer(cnn, cnn_normalization_mean, cnn_normalization_std,
                                 content_img, style_img, input_img,
