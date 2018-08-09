@@ -130,7 +130,9 @@ def compute_lap(path_img):
     input: image path
     output: laplacian matrix of the input image, format is sparse matrix of pytorch in gpu
     '''
-    image = 1.0 * cv2.imread(path_img, -1)/255.0
+    image = cv2.imread(path_img, -1)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = 1.0 * image / 255.0
     h, w, _ = image.shape
     const_size = np.zeros(shape=(h, w))
     M = compute_laplacian(image)    
