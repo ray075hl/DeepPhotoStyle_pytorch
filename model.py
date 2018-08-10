@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.nn.utils import clip_grad_norm
 from torch.autograd import Variable
 import torchvision.models as models
 import copy
@@ -21,9 +22,12 @@ class ContentLoss(nn.Module):
         self.target = target.detach()
 
     def forward(self, input):
-        # print('*************: ', input.size(), self.target.size())
-        channel, height, width = input.size()[1:4]
-        self.loss = F.mse_loss(input, self.target)
+        #print('*************: ', input.size(), self.target.size())
+        if input.size() != self.target.size():
+            pass
+        else:
+            channel, height, width = input.size()[1:4]
+            self.loss = F.mse_loss(input, self.target)
         return input
 
 
@@ -45,8 +49,8 @@ class StyleLoss(nn.Module):
     def __init__(self, target_feature, style_mask, content_mask):
         super(StyleLoss, self).__init__()
 
-        self.style_mask = style_mask.clone()
-        self.content_mask = content_mask.clone()
+        self.style_mask = style_mask.detach()
+        self.content_mask = content_mask.detach()
 
         #print(target_feature.type(), mask.type())
         _, channel_f, height, width = target_feature.size()
@@ -101,7 +105,7 @@ class StyleLoss(nn.Module):
                 inputs_G.append( gram_matrix(temp.unsqueeze(0)))
         for i in range(channel):
             mask_mean = torch.mean(mask[i, :, :])
-            self.loss += F.mse_loss(inputs_G[i], self.targets[i])# * mask_mean
+            self.loss += F.mse_loss(inputs_G[i], self.targets[i]) * mask_mean
         
         return input_feature
 
@@ -193,10 +197,6 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
     # to put in modules that are supposed to be activated sequentially
     model = nn.Sequential(normalization)
 
-    #realistic_loss = RealLoss(laplacian_m)
-    #model.add_module("real_loss_{}".format(0), realistic_loss)
-    #real_losses.append(realistic_loss) 
-
     tv_loss = TVLoss()
     model.add_module("tv_loss_{}".format(0), tv_loss)
     tv_losses.append(tv_loss)
@@ -204,7 +204,7 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
     num_conv = 0
     content_num = 0
     style_num = 0
-    for layer in cnn.children():          # cnn feature  是没有 全连接层的
+    for layer in cnn.children():          # cnn feature without fully connected layers
         if isinstance(layer, nn.Conv2d):
             num_conv += 1
             name = 'conv{}_{}'.format(num_pool, num_conv)
@@ -229,14 +229,14 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
             # add content loss
             print('xixi: ', content_img.size())
             target = model(content_img).detach()
-            print('content target size: ', target.size())
+            #print('content target size: ', target.size())
             content_loss = ContentLoss(target)
             model.add_module("content_loss_{}".format(content_num), content_loss)
             content_losses.append(content_loss)
             content_num += 1
         if name in style_layers:
             # add style loss:
-            print('style_:', style_img.type())
+            #print('style_:', style_img.type())
             target_feature = model(style_img).detach()
             style_loss = StyleLoss(target_feature, style_mask.detach(), content_mask.detach())
             model.add_module("style_loss_{}".format(style_num), style_loss)
@@ -255,21 +255,22 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
 def get_input_optimizer(input_img):
     # this line to show that input is a parameter that requires a gradient
-    optimizer = optim.LBFGS([input_img.requires_grad_()], max_iter=1000)
+    optimizer = optim.LBFGS([input_img.requires_grad_()])
     # optimizer = optim.Adam([input_img.requires_grad_()])
     return optimizer
 '''
 def manual_grad(image, laplacian_m):
     img = image.squeeze(0)
     channel, height, width = img.size() 
+    
     loss = 0
+    temp = img.reshape(3, -1)
+    grad = torch.mm(laplacian_m, temp.t())
     
-    grad = torch.mm(laplacian_m, img.reshape(-1, 3))
-    
-    loss += (grad * img.reshape(-1, 3)).sum()
-    return loss, 2.*grad.reshape(img.size())
+    loss += (grad * temp.t()).sum()
+    return loss, None #2.*grad.reshape(img.size())
 '''
-def manual_grad(image, laplacian_m):
+def realistic_loss_grad(image, laplacian_m):
     img = image.squeeze(0)
     channel, height, width = img.size()
     loss = 0
@@ -281,10 +282,11 @@ def manual_grad(image, laplacian_m):
     gradient = torch.stack(grads, dim=0).unsqueeze(0)
     return loss, 2.*gradient
 
+
 def run_style_transfer(cnn, normalization_mean, normalization_std,
                        content_img, style_img, input_img, style_mask, content_mask, laplacian_m,
-                       num_steps=20000000,
-                       style_weight=10000000, content_weight=1000, tv_weight=0.001, rl_weight=10000):
+                       num_steps=3000,
+                       style_weight=1000000, content_weight=100, tv_weight=0.0001, rl_weight=1):
 
     """Run the style transfer."""
     print("Buliding the style transfer model..")
@@ -293,62 +295,100 @@ def run_style_transfer(cnn, normalization_mean, normalization_std,
     optimizer = get_input_optimizer(input_img)
 
     print("Optimizing...")
-
+    print('*'*20)
+    print("Style_weith: {} Content_weighti: {} \
+           TV_loss_weight: {} Realistic_loss_weight: {}".format \
+           (style_weight, content_weight, tv_weight, rl_weight))
+    print('*'*20)
     run = [0]
+    
+    best_loss = 1e10    
+    best_input = input_img.data 
+
     while run[0] <= num_steps:
 
-        def closure():
-            # correct the values of updated input image
+        def closure(): 
+            nonlocal best_loss
+            nonlocal input_img
+            nonlocal best_input
+
             input_img.data.clamp_(0, 1)
             optimizer.zero_grad()
+
             model(input_img)
+
             style_score = 0
             content_score = 0
             tv_score = 0
-            #rl_score = 0
+            
             
             for sl in style_losses:
                 style_score += sl.loss
+
             for cl in content_losses:
                 content_score += cl.loss
+
             for tl in tv_losses:
                 tv_score += tl.loss
-            #for rl in real_losses:
-            #    rl_score += rl.loss
-
-            rl_score, part_grid = manual_grad(input_img, laplacian_m)
             
             style_score *= style_weight
             content_score *= content_weight
-            tv_score *= tv_weight        
-            rl_score *= rl_weight
-           
-            loss = style_score + content_score + tv_score + rl_score
+            tv_score *= tv_weight    
+
+            # Two stage optimaztion pipline    
+            if run[0] > num_steps // 2:
+                # Realistic loss relate sparse matrix computing, 
+                # which do not support autogard in pytorch, so we compute it separately.
+                rl_score, part_grid = realistic_loss_grad(input_img, laplacian_m)
+                rl_score *= rl_weight
+
+                loss = style_score + content_score + tv_score + rl_score
+
+                # Store the best result for outputing
+                if loss < best_loss:
+                    # print(best_loss)
+                    best_loss = loss
+                    best_input = input_img.data.clone()
+            else:
+                loss = style_score + content_score + tv_score
+
+                rl_score = torch.zeros(1) # Just to print
+
+                if loss < best_loss and run[0] > 0:
+                    # print(best_loss)
+                    best_loss = loss
+                    best_input = input_img.data
+
+                if run[0] == num_steps // 2:
+                    # Store the best temp result to initialize second stage input
+                    input_img.data = best_input
+                    best_loss = 1e10
+
             loss.backward()
             
-            #input_img.grad += rl_weight * part_grid
-           
-            
+            # Gradient cliping deal with gradient exploding
+            clip_grad_norm(model.parameters(), 15.0)
+          
             run[0] += 1
             if run[0] % 50 == 0:
-                print("run {}:".format(run))
-                print('Style Loss: {:4f} Content Loss: {:4f} TV Loss: {} , real loss: {}'.format(
-                   style_score.item(), content_score.item(), tv_score, rl_score
-                ))
+                print("run {}/{}:".format(run, num_steps))
+        
+                print('Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} real loss: {:4f}'.format(
+                   style_score.item(), content_score.item(), tv_score.item(), rl_score.item()))
+
                 print('Total Loss: ', loss.item())
-                print()
-                saved_img = input_img.clone()
+              
+                saved_img = input_img.clone() 
                 saved_img.data.clamp_(0, 1)
-                utils.save_pic(saved_img, 7000000+run[0])
-            return style_score + content_score + tv_score + rl_score
+                utils.save_pic(saved_img, run[0])
+            return loss
 
         optimizer.step(closure)
-        
+              
     # a last corrention...
+    input_img.data = best_input
     input_img.data.clamp_(0, 1)
     
     return input_img
-
-
 
 

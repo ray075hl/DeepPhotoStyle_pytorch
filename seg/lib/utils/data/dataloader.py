@@ -189,7 +189,7 @@ class DataLoaderIter(object):
         self.dataset = loader.dataset
         self.collate_fn = loader.collate_fn
         self.batch_sampler = loader.batch_sampler
-        self.num_workers = loader.num_workers
+        self.num_workers = 0#loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
         self.done_event = threading.Event()
