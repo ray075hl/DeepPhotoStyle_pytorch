@@ -7,6 +7,7 @@ This project supply semantic segmentation code.
 ![](./doc_image/ex_003.jpg)
 ## Setup
 Install [pytorch](https://pytorch.org/) version 0.4.1 with CUDA
+Python version: python3.6
 
 ```
 git clone 
