@@ -18,11 +18,12 @@ cd DeepPhotoStyle_pytorch
 
 sh download_seg_model.sh 
 
-# Or download segmentation model [here](https://drive.google.com/open?id=1kkeWEQyyLPELBDbxNljEWBn4DBEwP1ZZ)  
+
 
 
 python main.py --style_image path_style_image --content_image path_content_image
 ```
+**download_seg_model site may not available. You can download segmentation model** [here](https://drive.google.com/open?id=1kkeWEQyyLPELBDbxNljEWBn4DBEwP1ZZ)  
 
 ## Notice
 The semantic segmentation result of image pair(style and content) have a huge impact to the quality of transfered image. Check the segmentation result to see whether the relative semantic of image pair as you expected(for example, sky match sky, person match person etc.) or not.
