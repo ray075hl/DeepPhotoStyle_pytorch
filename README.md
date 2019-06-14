@@ -16,7 +16,10 @@ https://github.com/ray075hl/DeepPhotoStyle_pytorch.git
 
 cd DeepPhotoStyle_pytorch
 
-sh download_seg_model.sh
+sh download_seg_model.sh 
+
+# Or download segmentation model [here](https://drive.google.com/open?id=1kkeWEQyyLPELBDbxNljEWBn4DBEwP1ZZ)  
+
 
 python main.py --style_image path_style_image --content_image path_content_image
 ```
